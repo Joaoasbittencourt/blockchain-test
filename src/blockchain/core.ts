@@ -1,9 +1,12 @@
-import { SHA256 } from "crypto-js"
 import { padleft } from "../utils/pad"
-import { Block, DraftBlock, BlockChain } from "./types"
-import { GENESIS_HASH, generateCoinbaseTx } from "./generators"
+import { Block, BlockChain, KeyPair, Transaction } from "./types"
+import { COINBASE_ADDRESS, GENESIS_HASH } from "./constants"
+import { blockHash, signTx } from "./hash"
+import { last } from "../utils/array"
 
-const balance = (address: string, chain: Block[]) =>
+const difficultyPrefix = (difficulty: number) => padleft("", difficulty, "0")
+
+export const balance = (address: string, chain: Block[]) =>
   chain.reduce(
     (acc, block) =>
       acc +
@@ -15,27 +18,25 @@ const balance = (address: string, chain: Block[]) =>
     0
   )
 
-const blockHash = (block: DraftBlock) =>
-  SHA256(
-    `${block.previousHash}:${block.nonce}:${block.txs
-      .map((tx) => `${tx.from}->${tx.to}:${tx.amount}`)
-      .join(",")}`
-  ).toString()
-
-const getLatestBlock = (chain: Block[]) => (chain.length ? chain[chain.length - 1] : null)
-
-const difficultyPrefix = (difficulty: number) => padleft("", difficulty, "0")
-
 export const mineBlock = async (
-  { blocks, pendingTxs, difficulty, reward }: BlockChain,
-  minerAddress: string
-): Promise<Block> => {
+  blockchain: BlockChain,
+  { publicKey: minerAddress, privateKey: minerPk }: KeyPair
+): Promise<BlockChain> => {
+  const { blocks, pendingTxs, difficulty, reward } = blockchain
+
   let hash = ""
   let nonce = 0
 
-  const latest = getLatestBlock(blocks)
+  const latest = blocks.length ? last(blocks) : null
   const prefix = difficultyPrefix(difficulty)
-  const coinbase = generateCoinbaseTx({ reward }, minerAddress)
+  const coinbase = signTx(
+    {
+      from: COINBASE_ADDRESS,
+      to: minerAddress,
+      amount: reward,
+    },
+    minerPk
+  )
 
   const preblock = {
     txs: [coinbase, ...pendingTxs],
@@ -48,22 +49,20 @@ export const mineBlock = async (
       hash = blockHash({ ...preblock, nonce })
     }
 
-    resolve({ ...preblock, nonce, hash, timestamp: Date.now() })
+    const newBlock = { ...preblock, nonce, hash, timestamp: Date.now() }
+
+    resolve({
+      ...blockchain,
+      blocks: [...blocks, newBlock],
+      pendingTxs: [],
+    })
   })
 }
 
-export const validateBlock = (block: Block) => block.hash === blockHash(block)
-
-export const validateChain = (chain: BlockChain) => {
-  const { blocks } = chain
-
-  for (const block of blocks) {
-    console.log("blockHash", blockHash(block))
-    if (!validateBlock(block)) {
-      console.log(block)
-      return false
-    }
+export const appendTx = (chain: BlockChain, tx: Transaction) => {
+  const { pendingTxs } = chain
+  return {
+    ...chain,
+    pendingTxs: [...pendingTxs, tx],
   }
-
-  return true
 }

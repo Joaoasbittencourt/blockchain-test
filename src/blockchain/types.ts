@@ -19,4 +19,10 @@ export type Transaction = {
   from: string
   to: string
   amount: number
+  signature: string
+}
+
+export type KeyPair = {
+  publicKey: string
+  privateKey: string
 }
